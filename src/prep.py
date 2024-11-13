@@ -73,6 +73,125 @@ class Prep():
         self.img_host = img_host.lower()
         tmdb.API_KEY = config['DEFAULT']['tmdb_api']
 
+    def parse_bdinfo(self, bdinfo_str):
+        fields = {}
+
+        # Extract title, disc label, disc size, and protection
+        title_match = re.search(r"Disc Title:\s*(.*)", bdinfo_str, re.IGNORECASE)
+        label_match = re.search(r"Disc Label:\s*(.*)", bdinfo_str, re.IGNORECASE)
+        size_match = re.search(r"Disc Size:\s*(.*)", bdinfo_str, re.IGNORECASE)
+        protection_match = re.search(r"Protection:\s*(.*)", bdinfo_str, re.IGNORECASE)
+        
+        if title_match:
+            fields['title'] = title_match.group(1).strip()
+        if label_match:
+            fields['label'] = label_match.group(1).strip()
+        if size_match:
+            fields['size'] = size_match.group(1).strip()
+        if protection_match:
+            fields['protection'] = protection_match.group(1).strip()
+
+        # Detect if we're dealing with the compact format or standard format based on the presence of keywords
+        compact_format = bool(re.search(r"Video:\s*\w+.*?/\s*\d{4,} kbps", bdinfo_str))
+
+        # Extract video information
+        fields['video'] = []
+        if compact_format:
+            video_matches = re.findall(r"Video:\s*(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
+            for video in video_matches:
+                parts = video.split(" / ")
+                codec = parts[0].strip() if len(parts) > 0 else "UNKNOWN"
+                bitrate = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
+                resolution = parts[2].strip() if len(parts) > 2 else "UNKNOWN"
+                frame_rate = parts[3].strip() if len(parts) > 3 else "UNKNOWN"
+                aspect_ratio = parts[4].strip() if len(parts) > 4 else "UNKNOWN"
+                profile = parts[5].strip() if len(parts) > 5 else "UNKNOWN"
+
+                fields['video'].append({
+                    'codec': codec,
+                    'bitrate': bitrate,
+                    'res': resolution,
+                    'fps': frame_rate,
+                    'aspect_ratio': aspect_ratio,
+                    'profile': profile,
+                    'details': video.strip()
+                })
+        else:
+            video_matches = re.findall(r"Video:\s*Codec\s+(.*?)\s+Bitrate\s+(.*?)\s+Description\s+(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
+            for video in video_matches:
+                codec, bitrate, description = video
+                res_match = re.search(r"(\d{3,4}p)", description)
+                resolution = res_match.group(1) if res_match else "UNKNOWN"
+                fps_match = re.search(r"(\d{2}\.\d{3}) fps", description)
+                frame_rate = fps_match.group(1) if fps_match else "UNKNOWN"
+                ar_match = re.search(r"(\d{1,2}:\d{1,2})", description)
+                aspect_ratio = ar_match.group(1) if ar_match else "UNKNOWN"
+                profile_match = re.search(r"(High Profile \d\.\d|Main Profile|Baseline Profile|Main 10|Main 10 @ Level \d\.\d)", description)
+                profile = profile_match.group(1) if profile_match else "UNKNOWN"
+
+                fields['video'].append({
+                    'codec': codec.strip(),
+                    'bitrate': bitrate.strip(),
+                    'res': resolution,
+                    'fps': frame_rate,
+                    'aspect_ratio': aspect_ratio,
+                    'profile': profile,
+                    'details': description.strip()
+                })
+
+        # Extract audio information
+        fields['audio'] = []
+        if compact_format:
+            audio_matches = re.findall(r"Audio:\s*(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
+            for audio in audio_matches:
+                parts = audio.split(" / ")
+                language = parts[0].strip() if len(parts) > 0 else "UNKNOWN"
+                codec = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
+                channels = parts[2].strip() if len(parts) > 2 else "UNKNOWN"
+                bitrate = parts[3].strip() if len(parts) > 3 else "UNKNOWN"
+                details = audio.strip()
+
+                fields['audio'].append({
+                    'language': language,
+                    'codec': codec,
+                    'channels': channels,
+                    'bitrate': bitrate,
+                    'details': details
+                })
+        else:
+            audio_matches = re.findall(r"Audio:\s*Codec\s+(.*?)\s+Language\s+(.*?)\s+Bitrate\s+(.*?)\s+Description\s+(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
+            for audio in audio_matches:
+                codec, language, bitrate, description = audio
+                channels_match = re.search(r"(\d\.\d)", description)
+                channels = channels_match.group(1) if channels_match else "UNKNOWN"
+
+                fields['audio'].append({
+                    'codec': codec.strip(),
+                    'language': language.strip(),
+                    'bitrate': bitrate.strip(),
+                    'channels': channels,
+                    'details': description.strip()
+                })
+
+        # Extract subtitle information
+        fields['subtitles'] = []
+        subtitle_matches = re.findall(r"Subtitle:\s*(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
+        for subtitle in subtitle_matches:
+            parts = subtitle.split(" / ")
+            language = parts[0].strip() if len(parts) > 0 else "UNKNOWN"
+            codec = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
+            bitrate = parts[2].strip() if len(parts) > 2 else "UNKNOWN"
+            details = subtitle.strip()
+
+            fields['subtitles'].append({
+                'language': language,
+                'codec': codec,
+                'bitrate': bitrate,
+                'details': details
+            })
+
+        return fields
+
     async def prompt_user_for_confirmation(self, message: str) -> bool:
         try:
             response = input(f"{message} (Y/n): ").strip().lower()
@@ -238,6 +357,8 @@ class Prep():
                 found_match = False
 
         elif tracker_name == "PTP":
+            if meta.get('getbdinfo'):
+                bdinfo = {}
             imdb_id = None  # Ensure imdb_id is defined
             # Check if the PTP ID is already in meta
             if meta.get('ptp') is None:
@@ -253,7 +374,7 @@ class Prep():
                             found_match = True
 
                             # Retrieve PTP description and image list
-                            ptp_desc, ptp_imagelist = await tracker_instance.get_ptp_description(ptp_torrent_id, meta, meta.get('is_disc', False))
+                            ptp_desc, ptp_imagelist, ptp_bdinfo = await tracker_instance.get_ptp_description(ptp_torrent_id, meta, meta.get('is_disc', False))
                             meta['description'] = ptp_desc
                             with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'w', newline="", encoding='utf8') as description:
                                 description.write((ptp_desc or "") + "\n")
@@ -269,8 +390,41 @@ class Prep():
 
                     else:
                         found_match = True
-                        ptp_desc, ptp_imagelist = await tracker_instance.get_ptp_description(ptp_torrent_id, meta, meta.get('is_disc', False))
+                        ptp_desc, ptp_imagelist, ptp_bdinfo = await tracker_instance.get_ptp_description(ptp_torrent_id, meta, meta.get('is_disc', False))
                         meta['description'] = ptp_desc
+                        if meta.get('getbdinfo'):
+                            console.print("getbdinfo")
+                            ptp_bdinfo = self.parse_bdinfo(ptp_bdinfo)
+                            video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta, meta.get('imdb', None))
+                            meta['filelist'] = []  # No filelist for discs, use path
+                            search_term = os.path.basename(meta['path'])
+                            search_file_folder = 'folder'
+                            try:
+                                guess_name = ptp_bdinfo['title'].replace('-', ' ')
+                                filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
+                                untouched_filename = ptp_bdinfo['title']
+                                try:
+                                    meta['search_year'] = guessit(ptp_bdinfo['title'])['year']
+                                except Exception:
+                                    meta['search_year'] = ""
+                            except KeyError:
+                                guess_name = ptp_bdinfo['label'].replace('-', ' ')
+                                filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
+                                untouched_filename = ptp_bdinfo['label']
+                                try:
+                                    meta['search_year'] = guessit(ptp_bdinfo['label'])['year']
+                                except Exception:
+                                    meta['search_year'] = ""
+
+                            if meta.get('resolution', None) is None:
+                                video_info = ptp_bdinfo['video'][0] if ptp_bdinfo['video'] else ""
+                                meta['resolution'] = self.mi_resolution(video_info, guessit(video_info), width="OTHER", scan="p", height="OTHER", actual_height=0)
+
+                            meta['sd'] = self.is_sd(meta['resolution'])
+                            mi = None
+                            meta['filename'] = filename
+                            console.print("Filename", filename)
+                            meta['bdinfo'] = ptp_bdinfo  # Now ptp_bdinfo is a dictionary with parsed fields
                         with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'w', newline="", encoding='utf8') as description:
                             description.write((ptp_desc or "") + "\n")
                         meta['saved_description'] = True
@@ -292,8 +446,41 @@ class Prep():
                     console.print(f"[green]IMDb ID found: tt{meta['imdb']}[/green]")
                     found_match = True
                     meta['skipit'] = True
-                    ptp_desc, ptp_imagelist = await tracker_instance.get_ptp_description(meta['ptp'], meta, meta.get('is_disc', False))
+                    ptp_desc, ptp_imagelist, ptp_bdinfo = await tracker_instance.get_ptp_description(meta['ptp'], meta, meta.get('is_disc', False))
                     meta['description'] = ptp_desc
+                    if meta.get('getbdinfo'):
+                        ptp_bdinfo = self.parse_bdinfo(ptp_bdinfo)  # Now parsed as structured data
+                        video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta, meta.get('imdb', None))
+                        meta['filelist'] = []  # No filelist for discs, use path
+                        search_term = os.path.basename(meta['path'])
+                        search_file_folder = 'folder'
+                        try:
+                            guess_name = ptp_bdinfo['title'].replace('-', ' ')
+                            filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
+                            untouched_filename = ptp_bdinfo['title']
+                            try:
+                                meta['search_year'] = guessit(ptp_bdinfo['title'])['year']
+                            except Exception:
+                                meta['search_year'] = ""
+                        except KeyError:
+                            guess_name = ptp_bdinfo['label'].replace('-', ' ')
+                            filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
+                            untouched_filename = ptp_bdinfo['label']
+                            try:
+                                meta['search_year'] = guessit(ptp_bdinfo['label'])['year']
+                            except Exception:
+                                meta['search_year'] = ""
+
+                        if meta.get('resolution', None) is None:
+                            video_info = ptp_bdinfo['video'][0] if ptp_bdinfo['video'] else {'res': "UNKNOWN"}
+                            meta['resolution'] = self.mi_resolution(video_info['res'], guessit(video_info['details']), width="OTHER", scan="p", height="OTHER", actual_height=0)
+
+                        meta['sd'] = self.is_sd(meta['resolution'])
+                        mi = None
+                        meta['filename'] = filename
+                        meta['video'] = video
+                        console.print("Filename", filename)
+                        meta['bdinfo'] = ptp_bdinfo  # Store the parsed bdinfo in meta
                     with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'w', newline="", encoding='utf8') as description:
                         description.write(ptp_desc + "\n")
                     meta['saved_description'] = True
@@ -386,105 +573,110 @@ class Prep():
         # Debugging information
         # console.print(f"Debug: meta['filelist'] before population: {meta.get('filelist', 'Not Set')}")
 
-        if meta['is_disc'] == "BDMV":
-            video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta, meta.get('imdb', None))
+        if meta.get('getbdinfo'):
             meta['filelist'] = []  # No filelist for discs, use path
             search_term = os.path.basename(meta['path'])
             search_file_folder = 'folder'
-            try:
-                guess_name = bdinfo['title'].replace('-', ' ')
-                filename = guessit(re.sub(r"[^0-9a-zA-Z\[\\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
-                untouched_filename = bdinfo['title']
-                try:
-                    meta['search_year'] = guessit(bdinfo['title'])['year']
-                except Exception:
-                    meta['search_year'] = ""
-            except Exception:
-                guess_name = bdinfo['label'].replace('-', ' ')
-                filename = guessit(re.sub(r"[^0-9a-zA-Z\[\\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
-                untouched_filename = bdinfo['label']
-                try:
-                    meta['search_year'] = guessit(bdinfo['label'])['year']
-                except Exception:
-                    meta['search_year'] = ""
-
-            if meta.get('resolution', None) is None:
-                meta['resolution'] = self.mi_resolution(bdinfo['video'][0]['res'], guessit(video), width="OTHER", scan="p", height="OTHER", actual_height=0)
-            meta['sd'] = self.is_sd(meta['resolution'])
-
-            mi = None
-
-        elif meta['is_disc'] == "DVD":
-            video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta, meta.get('imdb', None))
-            meta['filelist'] = []
-            search_term = os.path.basename(meta['path'])
-            search_file_folder = 'folder'
-            guess_name = meta['discs'][0]['path'].replace('-', ' ')
-            filename = guessit(guess_name, {"excludes": ["country", "language"]})['title']
-            untouched_filename = os.path.basename(os.path.dirname(meta['discs'][0]['path']))
-            try:
-                meta['search_year'] = guessit(meta['discs'][0]['path'])['year']
-            except Exception:
-                meta['search_year'] = ""
-            if not meta.get('edit', False):
-                mi = self.exportInfo(f"{meta['discs'][0]['path']}/VTS_{meta['discs'][0]['main_set'][0][:2]}_1.VOB", False, meta['uuid'], meta['base_dir'], export_text=False)
-                meta['mediainfo'] = mi
-            else:
-                mi = meta['mediainfo']
-
-            meta['dvd_size'] = await self.get_dvd_size(meta['discs'], meta.get('manual_dvds'))
-            meta['resolution'] = self.get_resolution(guessit(video), meta['uuid'], base_dir)
-            meta['sd'] = self.is_sd(meta['resolution'])
-
-        elif meta['is_disc'] == "HDDVD":
-            video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta, meta.get('imdb', None))
-            meta['filelist'] = []
-            search_term = os.path.basename(meta['path'])
-            search_file_folder = 'folder'
-            guess_name = meta['discs'][0]['path'].replace('-', '')
-            filename = guessit(guess_name, {"excludes": ["country", "language"]})['title']
-            untouched_filename = os.path.basename(meta['discs'][0]['path'])
-            videopath = meta['discs'][0]['largest_evo']
-            try:
-                meta['search_year'] = guessit(meta['discs'][0]['path'])['year']
-            except Exception:
-                meta['search_year'] = ""
-            if not meta.get('edit', False):
-                mi = self.exportInfo(meta['discs'][0]['largest_evo'], False, meta['uuid'], meta['base_dir'], export_text=False)
-                meta['mediainfo'] = mi
-            else:
-                mi = meta['mediainfo']
-            meta['resolution'] = self.get_resolution(guessit(video), meta['uuid'], base_dir)
-            meta['sd'] = self.is_sd(meta['resolution'])
-
         else:
-            videopath, meta['filelist'] = self.get_video(videoloc, meta.get('mode', 'discord'))
-            search_term = os.path.basename(meta['filelist'][0]) if meta['filelist'] else None
-            search_file_folder = 'file'
-            video, meta['scene'], meta['imdb'] = self.is_scene(videopath, meta, meta.get('imdb', None))
-            guess_name = ntpath.basename(video).replace('-', ' ')
-            filename = guessit(re.sub(r"[^0-9a-zA-Z\[\\]]+", " ", guess_name), {"excludes": ["country", "language"]}).get("title", guessit(re.sub("[^0-9a-zA-Z]+", " ", guess_name), {"excludes": ["country", "language"]})["title"])
-            untouched_filename = os.path.basename(video)
-            try:
-                meta['search_year'] = guessit(video)['year']
-            except Exception:
-                meta['search_year'] = ""
+            if meta['is_disc'] == "BDMV":
+                video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta, meta.get('imdb', None))
+                meta['filelist'] = []  # No filelist for discs, use path
+                search_term = os.path.basename(meta['path'])
+                search_file_folder = 'folder'
+                try:
+                    guess_name = bdinfo['title'].replace('-', ' ')
+                    filename = guessit(re.sub(r"[^0-9a-zA-Z\[\\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
+                    untouched_filename = bdinfo['title']
+                    try:
+                        meta['search_year'] = guessit(bdinfo['title'])['year']
+                    except Exception:
+                        meta['search_year'] = ""
+                except Exception:
+                    guess_name = bdinfo['label'].replace('-', ' ')
+                    filename = guessit(re.sub(r"[^0-9a-zA-Z\[\\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
+                    untouched_filename = bdinfo['label']
+                    try:
+                        meta['search_year'] = guessit(bdinfo['label'])['year']
+                    except Exception:
+                        meta['search_year'] = ""
 
-            if not meta.get('edit', False):
-                mi = self.exportInfo(videopath, meta['isdir'], meta['uuid'], base_dir, export_text=True)
-                meta['mediainfo'] = mi
-            else:
-                mi = meta['mediainfo']
+                if meta.get('resolution', None) is None:
+                    meta['resolution'] = self.mi_resolution(bdinfo['video'][0]['res'], guessit(video), width="OTHER", scan="p", height="OTHER", actual_height=0)
+                meta['sd'] = self.is_sd(meta['resolution'])
 
-            if meta.get('resolution', None) is None:
+                mi = None
+
+            elif meta['is_disc'] == "DVD":
+                video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta, meta.get('imdb', None))
+                meta['filelist'] = []
+                search_term = os.path.basename(meta['path'])
+                search_file_folder = 'folder'
+                guess_name = meta['discs'][0]['path'].replace('-', ' ')
+                filename = guessit(guess_name, {"excludes": ["country", "language"]})['title']
+                untouched_filename = os.path.basename(os.path.dirname(meta['discs'][0]['path']))
+                try:
+                    meta['search_year'] = guessit(meta['discs'][0]['path'])['year']
+                except Exception:
+                    meta['search_year'] = ""
+                if not meta.get('edit', False):
+                    mi = self.exportInfo(f"{meta['discs'][0]['path']}/VTS_{meta['discs'][0]['main_set'][0][:2]}_1.VOB", False, meta['uuid'], meta['base_dir'], export_text=False)
+                    meta['mediainfo'] = mi
+                else:
+                    mi = meta['mediainfo']
+
+                meta['dvd_size'] = await self.get_dvd_size(meta['discs'], meta.get('manual_dvds'))
                 meta['resolution'] = self.get_resolution(guessit(video), meta['uuid'], base_dir)
-            meta['sd'] = self.is_sd(meta['resolution'])
+                meta['sd'] = self.is_sd(meta['resolution'])
 
-        if " AKA " in filename.replace('.', ' '):
-            filename = filename.split('AKA')[0]
-        meta['filename'] = filename
+            elif meta['is_disc'] == "HDDVD":
+                video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta, meta.get('imdb', None))
+                meta['filelist'] = []
+                search_term = os.path.basename(meta['path'])
+                search_file_folder = 'folder'
+                guess_name = meta['discs'][0]['path'].replace('-', '')
+                filename = guessit(guess_name, {"excludes": ["country", "language"]})['title']
+                untouched_filename = os.path.basename(meta['discs'][0]['path'])
+                videopath = meta['discs'][0]['largest_evo']
+                try:
+                    meta['search_year'] = guessit(meta['discs'][0]['path'])['year']
+                except Exception:
+                    meta['search_year'] = ""
+                if not meta.get('edit', False):
+                    mi = self.exportInfo(meta['discs'][0]['largest_evo'], False, meta['uuid'], meta['base_dir'], export_text=False)
+                    meta['mediainfo'] = mi
+                else:
+                    mi = meta['mediainfo']
+                meta['resolution'] = self.get_resolution(guessit(video), meta['uuid'], base_dir)
+                meta['sd'] = self.is_sd(meta['resolution'])
 
-        meta['bdinfo'] = bdinfo
+            else:
+                videopath, meta['filelist'] = self.get_video(videoloc, meta.get('mode', 'discord'))
+                search_term = os.path.basename(meta['filelist'][0]) if meta['filelist'] else None
+                search_file_folder = 'file'
+                video, meta['scene'], meta['imdb'] = self.is_scene(videopath, meta, meta.get('imdb', None))
+                guess_name = ntpath.basename(video).replace('-', ' ')
+                filename = guessit(re.sub(r"[^0-9a-zA-Z\[\\]]+", " ", guess_name), {"excludes": ["country", "language"]}).get("title", guessit(re.sub("[^0-9a-zA-Z]+", " ", guess_name), {"excludes": ["country", "language"]})["title"])
+                untouched_filename = os.path.basename(video)
+                try:
+                    meta['search_year'] = guessit(video)['year']
+                except Exception:
+                    meta['search_year'] = ""
+
+                if not meta.get('edit', False):
+                    mi = self.exportInfo(videopath, meta['isdir'], meta['uuid'], base_dir, export_text=True)
+                    meta['mediainfo'] = mi
+                else:
+                    mi = meta['mediainfo']
+
+                if meta.get('resolution', None) is None:
+                    meta['resolution'] = self.get_resolution(guessit(video), meta['uuid'], base_dir)
+                meta['sd'] = self.is_sd(meta['resolution'])
+
+                if " AKA " in filename.replace('.', ' '):
+                    filename = filename.split('AKA')[0]
+                meta['filename'] = filename
+
+                meta['bdinfo'] = bdinfo
 
         # Debugging information after population
         # console.print(f"Debug: meta['filelist'] after population: {meta.get('filelist', 'Not Set')}")
@@ -565,7 +757,10 @@ class Prep():
                             found_match = True
 
                 else:
-                    if "PTP" not in found_match:
+                    # Process all trackers with API = true if no specific tracker is set in meta
+                    default_trackers = self.config['TRACKERS'].get('default_trackers', "").split(", ")
+
+                    if "PTP" in default_trackers and not found_match:
                         if str(self.config['TRACKERS'].get('PTP', {}).get('useAPI')).lower() == "true":
                             ptp = PTP(config=self.config)
                             try:
@@ -578,7 +773,7 @@ class Prep():
                                 print(f"PTP tracker request failed due to connection error: {conn_err}")
 
                     if not meta['is_disc']:
-                        if "BLU" not in found_match:
+                        if "BLU" in default_trackers and not found_match:
                             if str(self.config['TRACKERS'].get('BLU', {}).get('useAPI')).lower() == "true":
                                 blu = BLU(config=self.config)
                                 try:
@@ -590,7 +785,7 @@ class Prep():
                                 except requests.exceptions.ConnectionError as conn_err:
                                     print(f"BLU tracker request failed due to connection error: {conn_err}")
 
-                        if "AITHER" not in found_match:
+                        if "AITHER" in default_trackers and not found_match:
                             if str(self.config['TRACKERS'].get('AITHER', {}).get('useAPI')).lower() == "true":
                                 aither = AITHER(config=self.config)
                                 try:
@@ -602,7 +797,7 @@ class Prep():
                                 except requests.exceptions.ConnectionError as conn_err:
                                     print(f"AITHER tracker request failed due to connection error: {conn_err}")
 
-                        if "LST" not in found_match:
+                        if "LST" in default_trackers and not found_match:
                             if str(self.config['TRACKERS'].get('LST', {}).get('useAPI')).lower() == "true":
                                 lst = LST(config=self.config)
                                 try:
@@ -614,7 +809,7 @@ class Prep():
                                 except requests.exceptions.ConnectionError as conn_err:
                                     print(f"LST tracker request failed due to connection error: {conn_err}")
 
-                        if "OE" not in found_match:
+                        if "OE" in default_trackers and not found_match:
                             if str(self.config['TRACKERS'].get('OE', {}).get('useAPI')).lower() == "true":
                                 oe = OE(config=self.config)
                                 try:
@@ -626,7 +821,7 @@ class Prep():
                                 except requests.exceptions.ConnectionError as conn_err:
                                     print(f"OE tracker request failed due to connection error: {conn_err}")
 
-                        if "TIK" not in found_match:
+                        if "TIK" in default_trackers and not found_match:
                             if str(self.config['TRACKERS'].get('TIK', {}).get('useAPI')).lower() == "true":
                                 tik = TIK(config=self.config)
                                 try:
@@ -638,7 +833,7 @@ class Prep():
                                 except requests.exceptions.ConnectionError as conn_err:
                                     print(f"TIK tracker request failed due to connection error: {conn_err}")
 
-                    if "HDB" not in found_match:
+                    if "HDB" in default_trackers and not found_match:
                         if str(self.config['TRACKERS'].get('HDB', {}).get('useAPI')).lower() == "true":
                             hdb = HDB(config=self.config)
                             try:
@@ -659,6 +854,12 @@ class Prep():
         else:
             console.print("Skipping existing search as meta already populated")
 
+        if meta.get('getbdinfo'):
+            filename = meta['filename']
+            video = meta['video']
+            mi = None
+            bdinfo = meta['bdinfo']
+            resolution = meta['resolution']
         if 'manual_frames' not in meta:
             meta['manual_frames'] = {}
         manual_frames = meta['manual_frames']
@@ -823,10 +1024,14 @@ class Prep():
                     }
                     discs.append(disc)
         if is_disc == "BDMV":
-            if meta.get('edit', False) is False:
-                discs, bdinfo = await parse.get_bdinfo(discs, meta['uuid'], meta['base_dir'], meta.get('discs', []))
+            if not meta.get('getbdinfo'):
+                if meta.get('edit', False) is False:
+                    discs, bdinfo = await parse.get_bdinfo(discs, meta['uuid'], meta['base_dir'], meta.get('discs', []))
+                else:
+                    discs, bdinfo = await parse.get_bdinfo(meta['discs'], meta['uuid'], meta['base_dir'], meta['discs'])
             else:
-                discs, bdinfo = await parse.get_bdinfo(meta['discs'], meta['uuid'], meta['base_dir'], meta['discs'])
+                bdinfo = {}
+                discs = {}
         elif is_disc == "DVD":
             discs = await parse.get_dvdinfo(discs)
             export = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt", 'w', newline="", encoding='utf-8')
@@ -1081,8 +1286,6 @@ class Prep():
                 scan = "Progressive"
             if scan == "Progressive":
                 scan = "p"
-            elif scan == "Interlaced":
-                scan = 'i'
             elif framerate == "25.000":
                 scan = "p"
             else:
@@ -2261,12 +2464,10 @@ class Prep():
 
     def is_3d(self, mi, bdinfo):
         if bdinfo is not None:
-            if bdinfo['video'][0]['3d'] != "":
+            video_info = bdinfo['video'][0] if bdinfo['video'] else {}
+            if video_info.get('3d', ""):
                 return "3D"
-            else:
-                return ""
-        else:
-            return ""
+        return ""
 
     def get_tag(self, video, meta):
         try:
@@ -2367,16 +2568,17 @@ class Prep():
     def get_hdr(self, mi, bdinfo):
         hdr = ""
         dv = ""
-        if bdinfo is not None:  # Disks
-            hdr_mi = bdinfo['video'][0]['hdr_dv']
+        if bdinfo is not None:  # Discs
+            hdr_mi = bdinfo['video'][0].get('hdr_dv', "")  # Use .get() to avoid KeyError
             if "HDR10+" in hdr_mi:
                 hdr = "HDR10+"
             elif hdr_mi == "HDR10":
                 hdr = "HDR"
+            
             try:
-                if bdinfo['video'][1]['hdr_dv'] == "Dolby Vision":
+                if bdinfo['video'][1].get('hdr_dv', "") == "Dolby Vision":
                     dv = "DV"
-            except Exception:
+            except IndexError:  # Handle case where there is no second video entry
                 pass
         else:
             video_track = mi['media']['track'][1]
@@ -2489,7 +2691,8 @@ class Prep():
             "MPEG-H HEVC Video": "HEVC",
             "VC-1 Video": "VC-1"
         }
-        codec = codecs.get(bdinfo['video'][0]['codec'], "")
+        codec_key = bdinfo['video'][0].get('codec', "")
+        codec = codecs.get(codec_key, "")
         return codec
 
     def get_video_encode(self, mi, type, bdinfo):

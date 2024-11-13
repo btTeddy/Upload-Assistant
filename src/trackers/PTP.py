@@ -204,7 +204,7 @@ class PTP():
         # console.print(f"[yellow]Raw description received:\n{ptp_desc[:6800]}...")  # Show first 500 characters for brevity
 
         bbcode = BBCODE()
-        desc, imagelist = bbcode.clean_ptp_description(ptp_desc, is_disc)
+        desc, imagelist, bdinfo = bbcode.clean_ptp_description(meta, ptp_desc, is_disc)
 
         console.print("[bold green]Successfully grabbed description from PTP")
         console.print(f"[cyan]Description after cleaning:[yellow]\n{desc[:1000]}...")  # Show first 1000 characters for brevity
@@ -232,7 +232,7 @@ class PTP():
             meta['description'] = ptp_desc
             meta['saved_description'] = True
 
-        return desc, imagelist
+        return desc, imagelist, bdinfo
 
     async def get_group_by_imdb(self, imdb):
         params = {
@@ -689,7 +689,7 @@ class PTP():
                                 new_screens = glob.glob1(f"{meta['base_dir']}/tmp/{meta['uuid']}", f"FILE_{i}-*.png")
                                 if not new_screens:
                                     use_vs = meta.get('vapoursynth', False)
-                                    ds = multiprocessing.Process(target=prep.disc_screenshots, args=(meta, f"FILE_{i}", each['bdinfo'], meta['uuid'], meta['base_dir'], use_vs, [], meta.get('ffdebug', False), multi_screens))
+                                    ds = multiprocessing.Process(target=prep.disc_screenshots, args=(f"FILE_{i}", each['bdinfo'], meta['uuid'], meta['base_dir'], use_vs, [], meta.get('ffdebug', False), multi_screens))
                                     ds.start()
                                     while ds.is_alive() is True:
                                         await asyncio.sleep(1)

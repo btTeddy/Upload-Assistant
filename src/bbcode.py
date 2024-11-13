@@ -2,6 +2,7 @@ import re
 import html
 import urllib.parse
 from src.console import console
+import os
 
 # Bold - KEEP
 # Italic - KEEP
@@ -36,8 +37,8 @@ class BBCODE:
     def __init__(self):
         pass
 
-    def clean_ptp_description(self, desc, is_disc):
-        # console.print("[yellow]Cleaning PTP description...")
+    def clean_ptp_description(self, meta, desc, is_disc):
+        console.print(f"[yellow]Cleaning PTP description...")
 
         # Convert Bullet Points to -
         desc = desc.replace("&bull;", "-")
@@ -60,6 +61,84 @@ class BBCODE:
         # Remove links to PTP/HDB
         desc = desc.replace('http://passthepopcorn.me', 'PTP').replace('https://passthepopcorn.me', 'PTP')
         desc = desc.replace('http://hdbits.org', 'HDB').replace('https://hdbits.org', 'HDB')
+
+        if meta.get('getbdinfo'):
+            bdinfo = {}
+            output_dir = f"{meta['base_dir']}/tmp/{meta['uuid']}"
+            os.makedirs(output_dir, exist_ok=True)  # Ensure directory exists
+            output_file_path = os.path.join(output_dir, "BD_SUMMARY_00.txt")
+
+            # Extract mediainfo content or proceed to parse manually
+            mediainfo_content = re.findall(r"\[mediainfo\]([\s\S]*?)\[\/mediainfo\]", desc)
+            mediainfo_text = "\n\n".join(mediainfo_content).strip() if mediainfo_content else ""
+
+            if len(mediainfo_text) < 10:  # Parse manually if mediainfo is insufficient
+                # Extract top-level fields with single-line formatting
+                fields = {
+                    "Disc Title": re.search(r"Disc Title:\s*(.*)", desc, re.IGNORECASE),
+                    "Disc Label": re.search(r"Disc Label:\s*(.*)", desc, re.IGNORECASE),
+                    "Disc Size": re.search(r"Disc Size:\s*(.*)", desc, re.IGNORECASE),
+                    "Protection": re.search(r"Protection:\s*(.*)", desc, re.IGNORECASE),
+                    "Playlist": re.search(r"Name:\s*(.*)", desc, re.IGNORECASE),
+                    "Size": re.search(r"Size:\s*(.*)", desc, re.IGNORECASE),
+                    "Length": re.search(r"Length:\s*(.*)", desc, re.IGNORECASE),
+                    "Total Bitrate": re.search(r"Total Bitrate:\s*(.*)", desc, re.IGNORECASE),
+                }
+
+                # Build the content to save based on parsed fields
+                content_to_save = ""
+                for field, match in fields.items():
+                    if match:
+                        content_to_save += f"{field}: {match.group(1).strip()}\n"
+
+                # Refined regex for capturing the video line directly
+                video_match = re.search(
+                    r"VIDEO:\s*\n.*?\n.*?\n\s*([A-Za-z0-9\- ]+ Video)\s+([\d,]+ kbps)\s+([^\n]+)",
+                    desc, re.IGNORECASE | re.MULTILINE
+                )
+                if video_match:
+                    codec, bitrate, description = video_match.groups()
+                    content_to_save += f"Video: {codec.strip()} / {bitrate.strip()} / {description.strip()}\n"
+                else:
+                    content_to_save += "Video: UNKNOWN\n"
+
+                # Refined regex to capture each audio line directly without headers
+                audio_matches = re.findall(
+                    r"^\s*(DTS-HD Master Audio|Dolby Digital Audio)\s+(\w+)\s+([\d,]+ kbps)\s+([^\n]+)",
+                    desc, re.MULTILINE
+                )
+                if audio_matches:
+                    for codec, language, bitrate, description in audio_matches:
+                        content_to_save += f"Audio: {language.strip()} / {codec.strip()} / {description.strip()}\n"
+                else:
+                    content_to_save += "Audio: UNKNOWN\n"
+
+                # Refined regex to capture each subtitle line directly without "Presentation Graphics" in the output
+                subtitle_matches = re.findall(
+                    r"^\s*Presentation Graphics\s+(\w+)\s+([\d,.]+ kbps)",
+                    desc, re.MULTILINE
+                )
+                if subtitle_matches:
+                    for language, bitrate in subtitle_matches:
+                        content_to_save += f"Subtitle: {language.strip()} / {bitrate.strip()}\n"
+                else:
+                    content_to_save += "Subtitle: UNKNOWN\n"
+
+                # Trim extra whitespace at the end of content
+                content_to_save = content_to_save.strip()
+            else:
+                # Use mediainfo content if it's available and valid
+                content_to_save = mediainfo_text
+
+            # Save the content to BD_SUMMARY_00.txt
+            with open(output_file_path, 'w', encoding='utf-8') as output_file:
+                output_file.write(content_to_save)
+
+            # Set bdinfo for further use
+            bdinfo = content_to_save
+
+        if is_disc == "DVD":
+            desc = re.sub(r"\[mediainfo\][\s\S]*?\[\/mediainfo\]", "", desc)
 
         if is_disc == "DVD":
             desc = re.sub(r"\[mediainfo\][\s\S]*?\[\/mediainfo\]", "", desc)
@@ -167,9 +246,9 @@ class BBCODE:
 
         if desc.replace('\n', '').strip() == '':
             console.print("[yellow]Description is empty after cleaning.")
-            return "", imagelist
+            return "", imagelist, bdinfo
 
-        return desc, imagelist
+        return desc, imagelist, bdinfo
 
     def clean_unit3d_description(self, desc, site):
         # Unescape HTML
