@@ -147,11 +147,20 @@ class BHD():
     async def get_type(self, meta):
         if meta['is_disc'] == "BDMV":
             bdinfo = meta['bdinfo']
+            if meta.get('getbdinfo'):
+                if 'size' in bdinfo and bdinfo['size']:
+                    bdinfo_size = int(bdinfo['size'].split()[0].replace(',', ''))
+                    bdinfo_size = bdinfo_size / (1 << 30)
+                    bdinfo['size'] = bdinfo_size
+                else:
+                    bdinfo['size'] = None
+
             bd_sizes = [25, 50, 66, 100]
-            for each in bd_sizes:
-                if bdinfo['size'] < each:
-                    bd_size = each
-                    break
+            if bdinfo['size'] is not None:
+                for each in bd_sizes:
+                    if bdinfo['size'] < each:
+                        bd_size = each
+                        break
             if meta['uhd'] == "UHD" and bd_size != 25:
                 type_id = f"UHD {bd_size}"
             else:

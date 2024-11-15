@@ -204,7 +204,10 @@ class PTP():
         # console.print(f"[yellow]Raw description received:\n{ptp_desc[:6800]}...")  # Show first 500 characters for brevity
 
         bbcode = BBCODE()
-        desc, imagelist, bdinfo = bbcode.clean_ptp_description(meta, ptp_desc, is_disc)
+        if meta.get('getbdinfo'):
+            desc, imagelist, bdinfo = bbcode.clean_ptp_description(meta, ptp_desc, is_disc)
+        else:
+            desc, imagelist = bbcode.clean_ptp_description(meta, ptp_desc, is_disc)
 
         console.print("[bold green]Successfully grabbed description from PTP")
         console.print(f"[cyan]Description after cleaning:[yellow]\n{desc[:1000]}...")  # Show first 1000 characters for brevity
@@ -232,7 +235,10 @@ class PTP():
             meta['description'] = ptp_desc
             meta['saved_description'] = True
 
-        return desc, imagelist, bdinfo
+        if meta.get('getbdinfo'):
+            return desc, imagelist, bdinfo
+        else:
+            return desc, imagelist
 
     async def get_group_by_imdb(self, imdb):
         params = {

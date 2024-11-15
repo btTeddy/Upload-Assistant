@@ -38,7 +38,7 @@ class BBCODE:
         pass
 
     def clean_ptp_description(self, meta, desc, is_disc):
-        console.print(f"[yellow]Cleaning PTP description...")
+        # console.print("[yellow]Cleaning PTP description...")
 
         # Convert Bullet Points to -
         desc = desc.replace("&bull;", "-")
@@ -244,11 +244,18 @@ class BBCODE:
             desc = desc.replace('\n', '', 1)
         desc = desc.strip('\n')
 
-        if desc.replace('\n', '').strip() == '':
-            console.print("[yellow]Description is empty after cleaning.")
-            return "", imagelist, bdinfo
+        if meta.get('getbdinfo'):
+            if desc.replace('\n', '').strip() == '':
+                console.print("[yellow]Description is empty after cleaning.")
+                return "", imagelist, bdinfo
 
-        return desc, imagelist, bdinfo
+            return desc, imagelist, bdinfo
+        else:
+            if desc.replace('\n', '').strip() == '':
+                console.print("[yellow]Description is empty after cleaning.")
+                return "", imagelist
+
+            return desc, imagelist
 
     def clean_unit3d_description(self, desc, site):
         # Unescape HTML

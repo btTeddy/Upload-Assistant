@@ -83,7 +83,7 @@ class Prep():
         label_match = re.search(r"Disc Label:\s*(.*)", bdinfo_str, re.IGNORECASE)
         size_match = re.search(r"Disc Size:\s*(.*)", bdinfo_str, re.IGNORECASE)
         protection_match = re.search(r"Protection:\s*(.*)", bdinfo_str, re.IGNORECASE)
-        
+
         if title_match:
             fields['title'] = title_match.group(1).strip()
         if label_match:
@@ -360,7 +360,7 @@ class Prep():
 
         elif tracker_name == "PTP":
             if meta.get('getbdinfo'):
-                bdinfo = {}
+                bdinfo = {}  # noqa F 841
             imdb_id = None  # Ensure imdb_id is defined
             # Check if the PTP ID is already in meta
             if meta.get('ptp') is None:
@@ -467,7 +467,7 @@ class Prep():
                         except KeyError:
                             guess_name = ptp_bdinfo['label'].replace('-', ' ')
                             filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
-                            untouched_filename = ptp_bdinfo['label']
+                            untouched_filename = ptp_bdinfo['label']  # noqa F841
                             try:
                                 meta['search_year'] = guessit(ptp_bdinfo['label'])['year']
                             except Exception:
@@ -478,7 +478,7 @@ class Prep():
                             meta['resolution'] = self.mi_resolution(video_info['res'], guessit(video_info['details']), width="OTHER", scan="p", height="OTHER", actual_height=0)
 
                         meta['sd'] = self.is_sd(meta['resolution'])
-                        mi = None
+                        mi = None  # noqa F841
                         meta['filename'] = filename
                         meta['video'] = video
                         console.print("Filename", filename)
@@ -864,7 +864,7 @@ class Prep():
             video = meta['video']
             mi = None
             bdinfo = meta['bdinfo']
-            resolution = meta['resolution']
+            resolution = meta['resolution']  # noqa F841
         if 'manual_frames' not in meta:
             meta['manual_frames'] = {}
         manual_frames = meta['manual_frames']
@@ -2579,7 +2579,7 @@ class Prep():
                 hdr = "HDR10+"
             elif hdr_mi == "HDR10":
                 hdr = "HDR"
-            
+
             try:
                 if bdinfo['video'][1].get('hdr_dv', "") == "Dolby Vision":
                     dv = "DV"
