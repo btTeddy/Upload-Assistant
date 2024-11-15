@@ -9,6 +9,7 @@ from pymediainfo import MediaInfo
 from pathlib import Path
 from src.trackers.COMMON import COMMON
 from src.console import console
+import re
 
 
 class ANT():
@@ -89,15 +90,18 @@ class ANT():
         if meta['bdinfo'] is not None:
             bd_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8').read()
             bd_dump = f'[spoiler=BDInfo][pre]{bd_dump}[/pre][/spoiler]'
-            path = os.path.join(meta['bdinfo']['path'], 'STREAM')
-            longest_file = max(
-                meta['bdinfo']['files'],
-                key=lambda x: x.get('length', 0)
-            )
-            file_name = longest_file['file'].lower()
-            m2ts = os.path.join(path, file_name)
-            media_info_output = str(MediaInfo.parse(m2ts, output="text", full=False))
-            mi_dump = media_info_output.replace('\r\n', '\n')
+            if meta.get('getbdinfo'):
+                mi_dump = self.make_mediainfo(meta)
+            else:
+                path = os.path.join(meta['bdinfo']['path'], 'STREAM')
+                longest_file = max(
+                    meta['bdinfo']['files'],
+                    key=lambda x: x.get('length', 0)
+                )
+                file_name = longest_file['file'].lower()
+                m2ts = os.path.join(path, file_name)
+                media_info_output = str(MediaInfo.parse(m2ts, output="text", full=False))
+                mi_dump = media_info_output.replace('\r\n', '\n')
         else:
             mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt", 'r', encoding='utf-8').read()
         open_torrent = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent", 'rb')
@@ -171,3 +175,103 @@ class ANT():
             await asyncio.sleep(5)
 
         return dupes
+
+    def make_mediainfo(self, meta):
+        # Read input from the file
+        file_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt"
+        with open(file_path, 'r', encoding='utf-8') as file:
+            input_string = file.read()
+
+        # Split the input into lines and initialize sections
+        lines = input_string.splitlines()
+        general_info = []
+        video_info = []
+        audio_tracks = []
+        subtitles = []
+
+        # Variable for tracking audio and subtitle IDs
+        audio_id = 4352
+        subtitle_id = 4608
+
+        # Parse each line in sequence
+        for line in lines:
+            key, *value = line.split(":")
+            key, value = key.strip(), ":".join(value).strip()
+
+            # General information
+            if key == "Disc Title":
+                general_info.append(f"Complete name : {value}")
+                general_info.append("Format : BDAV")
+                general_info.append("Format/Info : Blu-ray Video")
+            elif key == "Disc Size":
+                size_gb = round(int(value.replace(",", "").split()[0]) / (1024**3), 1)
+                general_info.append(f"File size                                : {size_gb} GiB")
+            elif key == "Length":
+                general_info.append(f"Duration                                 : {value.replace('.', ',')}")
+            elif key == "Total Bitrate":
+                general_info.append(f"Overall bit rate                         : {value}")
+            elif key == "Playlist":
+                general_info.append(f"Playlist                                 : {value}")
+
+            # Video information
+            elif key == "Video":
+                match = re.search(
+                    r"(MPEG-4 AVC Video) / ([\d,]+ kbps) / (\d+)p / ([\d.]+ fps) / (\d+:\d+)",
+                    value
+                )
+                if match:
+                    codec, bitrate, resolution, framerate, aspect_ratio = match.groups()
+                    video_info.extend([
+                        f"ID                                       : 4113 (0x1011)", # noqa F 541
+                        f"Format                                   : {codec.split()[0]}",
+                        f"Bit rate                                 : {bitrate}",
+                        f"Height                                   : {resolution} pixels",
+                        f"Frame rate                               : {framerate}",
+                        f"Display aspect ratio                     : {aspect_ratio}",
+                    ])
+
+            # Audio information
+            elif key == "Audio":
+                match = re.search(
+                    r"(.+?) / (.+?) / ([\d.]+) / ([\d,]+ kHz) / ([\d,]+ kbps)( / [\d-]+bit)?(?: \((.+?)\))?",
+                    value
+                )
+                if match:
+                    language, codec, channels, frequency, bitrate, bit_depth, core_info = match.groups()
+                    audio_track = [
+                        f"Audio #{len(audio_tracks) + 1}",
+                        f"ID                                       : {audio_id} (0x{audio_id:X})",
+                        f"Format                                   : {codec}",
+                        f"Channels                                 : {channels}",
+                        f"Sampling rate                            : {frequency}",
+                        f"Bit rate                                 : {bitrate}",
+                        f"Language                                 : {language}"
+                    ]
+                    if bit_depth:
+                        audio_track.append(f"Bit depth                                : {bit_depth.strip(' /')}")
+                    if core_info:
+                        audio_track.append(f"Core details                             : {core_info}")
+                    audio_tracks.append("\n".join(audio_track))
+                    audio_id += 1
+
+            # Subtitle information
+            elif key == "Subtitle":
+                match = re.search(r"(.+?) / ([\d.]+ kbps)", value)
+                if match:
+                    language, bitrate = match.groups()
+                    subtitles.append(
+                        f"Text\n"
+                        f"ID                                       : {subtitle_id} (0x{subtitle_id:X})\n"
+                        f"Language                                 : {language}\n"
+                        f"Bit rate                                 : {bitrate}"
+                    )
+                    subtitle_id += 1
+
+        # Assemble the final output
+        output = "\n".join(
+            ["General"] + general_info +
+            ["\nVideo"] + video_info +
+            ["\n".join(audio_tracks)] +
+            ["\n".join(subtitles)]
+        )
+        return output
