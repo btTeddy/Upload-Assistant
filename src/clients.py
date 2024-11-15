@@ -13,6 +13,7 @@ import ssl
 import shutil
 import time
 from src.console import console
+import re
 
 
 class Clients():
@@ -452,3 +453,66 @@ class Clients():
             remote_path = remote_path + os.sep
 
         return local_path, remote_path
+
+    async def get_ptp_from_hash(self, meta):
+        default_torrent_client = self.config['DEFAULT']['default_torrent_client']
+        client = self.config['TORRENT_CLIENTS'][default_torrent_client]
+        qbt_client = qbittorrentapi.Client(
+            host=client['qbit_url'],
+            port=client['qbit_port'],
+            username=client['qbit_user'],
+            password=client['qbit_pass'],
+            VERIFY_WEBUI_CERTIFICATE=client.get('VERIFY_WEBUI_CERTIFICATE', True)
+        )
+
+        try:
+            qbt_client.auth_log_in()
+        except qbittorrentapi.LoginFailed as e:
+            console.print(f"[bold red]Login failed while trying to get info hash: {e}")
+            exit(1)
+
+        info_hash_v1 = meta.get('infohash')
+        torrents = qbt_client.torrents_info()
+        found = False
+
+        for torrent in torrents:
+            if torrent.get('infohash_v1') == info_hash_v1:
+                comment = torrent.get('comment', "")
+
+                if "https://passthepopcorn.me" in comment:
+                    match = re.search(r'torrentid=(\d+)', comment)
+                    if match:
+                        meta['ptp'] = match.group(1)
+                        console.print(f"[bold cyan]meta['ptp'] set to torrentid: {meta['ptp']}")
+
+                elif "https://aither.cc" in comment:
+                    match = re.search(r'/(\d+)$', comment)
+                    if match:
+                        meta['aither'] = match.group(1)
+                        console.print(f"[bold cyan]meta['aither'] set to ID: {meta['aither']}")
+
+                elif "https://lst.gg" in comment:
+                    match = re.search(r'/(\d+)$', comment)
+                    if match:
+                        meta['lst'] = match.group(1)
+                        console.print(f"[bold cyan]meta['lst'] set to ID: {meta['lst']}")
+
+                elif "https://onlyencodes.cc" in comment:
+                    match = re.search(r'/(\d+)$', comment)
+                    if match:
+                        meta['oe'] = match.group(1)
+                        console.print(f"[bold cyan]meta['oe'] set to ID: {meta['oe']}")
+
+                elif "https://blutopia.cc" in comment:
+                    match = re.search(r'/(\d+)$', comment)
+                    if match:
+                        meta['blu'] = match.group(1)
+                        console.print(f"[bold cyan]meta['blu'] set to ID: {meta['blu']}")
+
+                found = True
+                break
+
+        if not found:
+            console.print("[bold red]Torrent with the specified infohash_v1 not found.")
+
+        return meta

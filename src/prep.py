@@ -10,6 +10,8 @@ from src.trackers.OE import OE
 from src.trackers.HDB import HDB
 from src.trackers.TIK import TIK
 from src.trackers.COMMON import COMMON
+from src.clients import Clients
+from data.config import config
 
 try:
     import traceback
@@ -688,6 +690,10 @@ class Prep():
         with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'w', newline="", encoding='utf8') as description:
             description.write(description_text)
 
+        client = Clients(config=config)
+        if meta.get('infohash') is not None:
+            meta = await client.get_ptp_from_hash(meta)
+
         if not meta.get('image_list'):
             # Reuse information from trackers with fallback
             found_match = False
@@ -712,7 +718,6 @@ class Prep():
 
                 # If a specific tracker is found, only process that one
                 if specific_tracker:
-                    console.print(f"[blue]Processing only the {specific_tracker} tracker based on meta.[/blue]")
 
                     if specific_tracker == 'PTP':
                         ptp = PTP(config=self.config)

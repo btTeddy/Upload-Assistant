@@ -95,6 +95,7 @@ class Args():
         parser.add_argument('-cleanup', '--cleanup', action='store_true', required=False, help="Clean up tmp directory")
         parser.add_argument('-fl', '--freeleech', nargs='*', required=False, help="Freeleech Percentage", default=0, dest="freeleech")
         parser.add_argument('--getbdinfo', dest='getbdinfo', action='store_true', required=False, help="Pull BDInfo from PTP description")
+        parser.add_argument('--infohash', nargs='*', required=False, help="V1 Info Hash")
         args, before_args = parser.parse_known_args(input)
         args = vars(args)
         # console.print(args)
