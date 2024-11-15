@@ -134,7 +134,6 @@ class BBCODE:
             with open(output_file_path, 'w', encoding='utf-8') as output_file:
                 output_file.write(content_to_save)
 
-            # Set bdinfo for further use
             bdinfo = content_to_save
 
         if is_disc == "DVD":
@@ -248,7 +247,7 @@ class BBCODE:
             if desc.replace('\n', '').strip() == '':
                 console.print("[yellow]Description is empty after cleaning.")
                 return "", imagelist, bdinfo
-
+            console.print("[yellow]Final BD Info being returned:[/yellow]", bdinfo)
             return desc, imagelist, bdinfo
         else:
             if desc.replace('\n', '').strip() == '':

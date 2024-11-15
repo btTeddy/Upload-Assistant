@@ -206,8 +206,11 @@ class PTP():
         bbcode = BBCODE()
         if meta.get('getbdinfo'):
             desc, imagelist, bdinfo = bbcode.clean_ptp_description(meta, ptp_desc, is_disc)
+            meta['bdinfo'] = bdinfo
+            console.print("[blue]BD Info after cleaning:[/blue]", bdinfo)
         else:
             desc, imagelist = bbcode.clean_ptp_description(meta, ptp_desc, is_disc)
+            console.print("[yellow]We skipped bdinfo")
 
         console.print("[bold green]Successfully grabbed description from PTP")
         console.print(f"[cyan]Description after cleaning:[yellow]\n{desc[:1000]}...")  # Show first 1000 characters for brevity

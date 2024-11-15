@@ -76,121 +76,67 @@ class Prep():
         tmdb.API_KEY = config['DEFAULT']['tmdb_api']
 
     def parse_bdinfo(self, bdinfo_str):
+        console.print("bdinfo_str input:", bdinfo_str)
         fields = {}
 
-        # Extract title, disc label, disc size, and protection
-        title_match = re.search(r"Disc Title:\s*(.*)", bdinfo_str, re.IGNORECASE)
-        label_match = re.search(r"Disc Label:\s*(.*)", bdinfo_str, re.IGNORECASE)
-        size_match = re.search(r"Disc Size:\s*(.*)", bdinfo_str, re.IGNORECASE)
-        protection_match = re.search(r"Protection:\s*(.*)", bdinfo_str, re.IGNORECASE)
+        # Extract basic metadata
+        fields['title'] = re.search(r"Disc Title:\s*(.+)", bdinfo_str, re.IGNORECASE).group(1).strip() if re.search(r"Disc Title:\s*(.+)", bdinfo_str, re.IGNORECASE) else "UNKNOWN"
+        fields['label'] = re.search(r"Disc Label:\s*(.+)", bdinfo_str, re.IGNORECASE).group(1).strip() if re.search(r"Disc Label:\s*(.+)", bdinfo_str, re.IGNORECASE) else "UNKNOWN"
+        fields['size'] = re.search(r"Disc Size:\s*(.+)", bdinfo_str, re.IGNORECASE).group(1).strip() if re.search(r"Disc Size:\s*(.+)", bdinfo_str, re.IGNORECASE) else "UNKNOWN"
+        fields['protection'] = re.search(r"Protection:\s*(.+)", bdinfo_str, re.IGNORECASE).group(1).strip() if re.search(r"Protection:\s*(.+)", bdinfo_str, re.IGNORECASE) else "UNKNOWN"
 
-        if title_match:
-            fields['title'] = title_match.group(1).strip()
-        if label_match:
-            fields['label'] = label_match.group(1).strip()
-        if size_match:
-            fields['size'] = size_match.group(1).strip()
-        if protection_match:
-            fields['protection'] = protection_match.group(1).strip()
+        # Detect compact format
+        compact_format = not bool(re.search(r"Video:\s*Codec\s+", bdinfo_str, re.IGNORECASE))
 
-        # Detect if we're dealing with the compact format or standard format based on the presence of keywords
-        compact_format = bool(re.search(r"Video:\s*\w+.*?/\s*\d{4,} kbps", bdinfo_str))
+        # Helper to parse components
+        def parse_components(matches, keys):
+            results = []
+            for match in matches:
+                result = {key: match[i].strip() if i < len(match) else "UNKNOWN" for i, key in enumerate(keys)}
+                results.append(result)
+            return results
 
-        # Extract video information
+        # Video Parsing
         fields['video'] = []
         if compact_format:
-            video_matches = re.findall(r"Video:\s*(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
-            for video in video_matches:
-                parts = video.split(" / ")
-                codec = parts[0].strip() if len(parts) > 0 else "UNKNOWN"
-                bitrate = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
-                resolution = parts[2].strip() if len(parts) > 2 else "UNKNOWN"
-                frame_rate = parts[3].strip() if len(parts) > 3 else "UNKNOWN"
-                aspect_ratio = parts[4].strip() if len(parts) > 4 else "UNKNOWN"
-                profile = parts[5].strip() if len(parts) > 5 else "UNKNOWN"
-
-                fields['video'].append({
-                    'codec': codec,
-                    'bitrate': bitrate,
-                    'res': resolution,
-                    'fps': frame_rate,
-                    'aspect_ratio': aspect_ratio,
-                    'profile': profile,
-                    'details': video.strip()
-                })
+            video_matches = re.findall(r"Video:\s*(.+?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
+            fields['video'] = parse_components(
+                [video.split(" / ") for video in video_matches],
+                ['codec', 'bitrate', 'res', 'fps', 'aspect_ratio', 'details']
+            )
         else:
-            video_matches = re.findall(r"Video:\s*Codec\s+(.*?)\s+Bitrate\s+(.*?)\s+Description\s+(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
-            for video in video_matches:
-                codec, bitrate, description = video
-                res_match = re.search(r"(\d{3,4}p)", description)
-                resolution = res_match.group(1) if res_match else "UNKNOWN"
-                fps_match = re.search(r"(\d{2}\.\d{3}) fps", description)
-                frame_rate = fps_match.group(1) if fps_match else "UNKNOWN"
-                ar_match = re.search(r"(\d{1,2}:\d{1,2})", description)
-                aspect_ratio = ar_match.group(1) if ar_match else "UNKNOWN"
-                profile_match = re.search(r"(High Profile \d\.\d|Main Profile|Baseline Profile|Main 10|Main 10 @ Level \d\.\d)", description)
-                profile = profile_match.group(1) if profile_match else "UNKNOWN"
+            video_matches = re.findall(
+                r"Video:\s*Codec\s+(.*?)\s+Bitrate\s+(.*?)\s+Description\s+(.+?)(?:\n|$)", bdinfo_str, re.IGNORECASE
+            )
+            fields['video'] = parse_components(
+                video_matches,
+                ['codec', 'bitrate', 'details']
+            )
 
-                fields['video'].append({
-                    'codec': codec.strip(),
-                    'bitrate': bitrate.strip(),
-                    'res': resolution,
-                    'fps': frame_rate,
-                    'aspect_ratio': aspect_ratio,
-                    'profile': profile,
-                    'details': description.strip()
-                })
-
-        # Extract audio information
+        # Audio Parsing
         fields['audio'] = []
         if compact_format:
-            audio_matches = re.findall(r"Audio:\s*(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
-            for audio in audio_matches:
-                parts = audio.split(" / ")
-                language = parts[0].strip() if len(parts) > 0 else "UNKNOWN"
-                codec = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
-                channels = parts[2].strip() if len(parts) > 2 else "UNKNOWN"
-                bitrate = parts[3].strip() if len(parts) > 3 else "UNKNOWN"
-                details = audio.strip()
-
-                fields['audio'].append({
-                    'language': language,
-                    'codec': codec,
-                    'channels': channels,
-                    'bitrate': bitrate,
-                    'details': details
-                })
+            audio_matches = re.findall(r"Audio:\s*(.+?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
+            fields['audio'] = parse_components(
+                [audio.split(" / ") for audio in audio_matches],
+                ['language', 'codec', 'channels', 'bitrate', 'details']
+            )
         else:
-            audio_matches = re.findall(r"Audio:\s*Codec\s+(.*?)\s+Language\s+(.*?)\s+Bitrate\s+(.*?)\s+Description\s+(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
-            for audio in audio_matches:
-                codec, language, bitrate, description = audio
-                channels_match = re.search(r"(\d\.\d)", description)
-                channels = channels_match.group(1) if channels_match else "UNKNOWN"
+            audio_matches = re.findall(
+                r"Audio:\s*Codec\s+(.*?)\s+Language\s+(.*?)\s+Bitrate\s+(.*?)\s+Description\s+(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE
+            )
+            fields['audio'] = parse_components(
+                audio_matches,
+                ['codec', 'language', 'bitrate', 'details']
+            )
 
-                fields['audio'].append({
-                    'codec': codec.strip(),
-                    'language': language.strip(),
-                    'bitrate': bitrate.strip(),
-                    'channels': channels,
-                    'details': description.strip()
-                })
-
-        # Extract subtitle information
+        # Subtitle Parsing
         fields['subtitles'] = []
-        subtitle_matches = re.findall(r"Subtitle:\s*(.*?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
-        for subtitle in subtitle_matches:
-            parts = subtitle.split(" / ")
-            language = parts[0].strip() if len(parts) > 0 else "UNKNOWN"
-            codec = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
-            bitrate = parts[2].strip() if len(parts) > 2 else "UNKNOWN"
-            details = subtitle.strip()
-
-            fields['subtitles'].append({
-                'language': language,
-                'codec': codec,
-                'bitrate': bitrate,
-                'details': details
-            })
+        subtitle_matches = re.findall(r"Subtitle:\s*(.+?)(?:\n|$)", bdinfo_str, re.IGNORECASE)
+        fields['subtitles'] = parse_components(
+            [subtitle.split(" / ") for subtitle in subtitle_matches],
+            ['language', 'codec', 'bitrate', 'details']
+        )
 
         return fields
 
@@ -360,7 +306,7 @@ class Prep():
 
         elif tracker_name == "PTP":
             if meta.get('getbdinfo'):
-                bdinfo = {}  # noqa F 841
+                bdinfo = {}  # noqa F841
             imdb_id = None  # Ensure imdb_id is defined
             # Check if the PTP ID is already in meta
             if meta.get('ptp') is None:
@@ -376,7 +322,7 @@ class Prep():
                             found_match = True
 
                             # Retrieve PTP description and image list
-                            ptp_desc, ptp_imagelist, ptp_bdinfo = await tracker_instance.get_ptp_description(ptp_torrent_id, meta, meta.get('is_disc', False))
+                            ptp_desc, ptp_imagelist = await tracker_instance.get_ptp_description(ptp_torrent_id, meta, meta.get('is_disc', False))
                             meta['description'] = ptp_desc
                             with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'w', newline="", encoding='utf8') as description:
                                 description.write((ptp_desc or "") + "\n")
@@ -449,32 +395,36 @@ class Prep():
                     found_match = True
                     meta['skipit'] = True
                     ptp_desc, ptp_imagelist, ptp_bdinfo = await tracker_instance.get_ptp_description(meta['ptp'], meta, meta.get('is_disc', False))
+                    console.print("ptp bdinfo:", ptp_bdinfo)
                     meta['description'] = ptp_desc
                     if meta.get('getbdinfo'):
-                        ptp_bdinfo = self.parse_bdinfo(ptp_bdinfo)  # Now parsed as structured data
+                        ptp1_bdinfo = self.parse_bdinfo(ptp_bdinfo)
+                        console.print("ptp1 bdinfo:", ptp1_bdinfo)
                         video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta, meta.get('imdb', None))
                         meta['filelist'] = []  # No filelist for discs, use path
                         search_term = os.path.basename(meta['path'])
                         search_file_folder = 'folder'
                         try:
-                            guess_name = ptp_bdinfo['title'].replace('-', ' ')
+                            guess_name = ptp1_bdinfo['title'].replace('-', ' ')
                             filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
-                            untouched_filename = ptp_bdinfo['title']
+                            untouched_filename = ptp1_bdinfo['title']
                             try:
-                                meta['search_year'] = guessit(ptp_bdinfo['title'])['year']
+                                meta['search_year'] = guessit(ptp1_bdinfo['title'])['year']
                             except Exception:
                                 meta['search_year'] = ""
                         except KeyError:
-                            guess_name = ptp_bdinfo['label'].replace('-', ' ')
+                            guess_name = ptp1_bdinfo['label'].replace('-', ' ')
                             filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
-                            untouched_filename = ptp_bdinfo['label']  # noqa F841
+                            untouched_filename = ptp1_bdinfo['label']  # noqa F841
                             try:
-                                meta['search_year'] = guessit(ptp_bdinfo['label'])['year']
+                                meta['search_year'] = guessit(ptp1_bdinfo['label'])['year']
                             except Exception:
                                 meta['search_year'] = ""
 
                         if meta.get('resolution', None) is None:
-                            video_info = ptp_bdinfo['video'][0] if ptp_bdinfo['video'] else {'res': "UNKNOWN"}
+                            video_info = ptp1_bdinfo['video'][0] if ptp1_bdinfo['video'] else {'res': "UNKNOWN"}
+                            console.print("ptp1 bdinfo:", ptp1_bdinfo)
+                            console.print("video info:", video_info)
                             meta['resolution'] = self.mi_resolution(video_info['res'], guessit(video_info['details']), width="OTHER", scan="p", height="OTHER", actual_height=0)
 
                         meta['sd'] = self.is_sd(meta['resolution'])
@@ -482,7 +432,7 @@ class Prep():
                         meta['filename'] = filename
                         meta['video'] = video
                         console.print("Filename", filename)
-                        meta['bdinfo'] = ptp_bdinfo  # Store the parsed bdinfo in meta
+                        meta['bdinfo'] = ptp1_bdinfo
                     with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'w', newline="", encoding='utf8') as description:
                         description.write(ptp_desc + "\n")
                     meta['saved_description'] = True
@@ -674,11 +624,11 @@ class Prep():
                     meta['resolution'] = self.get_resolution(guessit(video), meta['uuid'], base_dir)
                 meta['sd'] = self.is_sd(meta['resolution'])
 
-                if " AKA " in filename.replace('.', ' '):
-                    filename = filename.split('AKA')[0]
-                meta['filename'] = filename
+            if " AKA " in filename.replace('.', ' '):
+                filename = filename.split('AKA')[0]
+            meta['filename'] = filename
 
-                meta['bdinfo'] = bdinfo
+            meta['bdinfo'] = bdinfo
 
         # Debugging information after population
         # console.print(f"Debug: meta['filelist'] after population: {meta.get('filelist', 'Not Set')}")
